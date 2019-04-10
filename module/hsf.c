@@ -14,6 +14,31 @@
 		(1 << NF_INET_FORWARD) | \
 		(1 << NF_INET_LOCAL_OUT))
 
+struct hsf_entry {
+	struct ipt_ip ipinfo;
+	unsigned int verdict;
+};
+
+struct hsf_replace {
+    /* Which table. */
+    char name[HSF_TABLE_MAXNAMELEN];
+
+    /* Which hook entry points are valid:bitmask. 
+     * can't change this in user space. */
+    unsigned int valid_hooks;
+
+    /* Number of entries */
+    unsigned int num_entries;
+
+    /* Total size of new entries */
+    unsigned int size;
+
+    /* Hook entry points. */
+    unsigned int hook_entry[NF_INET_NUMHOOKS];
+
+    /* The entries (hang off end: not really an array). */
+    struct hsf_entry entries[0];
+};
 
 struct hsf_table {
 	struct list_head hooks[NF_INET_NUMHOOKS];
@@ -155,6 +180,17 @@ hsf_filter_hook(void *priv, struct sk_buff *skb,
 	return hsf_do_table(priv, skb, state);
 }
 
+static struct nf_sockopt_ops hsf_sockopts = {
+    .pf     = PF_INET,
+    .set_optmin = IPT_BASE_CTL,
+    .set_optmax = IPT_SO_SET_MAX + 1,
+    .set    = do_hsf_set_ctl,
+    .get_optmin = IPT_BASE_CTL,
+    .get_optmax = IPT_SO_GET_MAX + 1,
+    .get    = do_hsf_get_ctl,
+    .owner  = THIS_MODULE,
+};
+
 int __init hsf_init(void)
 {
 	int i,ret;
@@ -175,6 +211,12 @@ int __init hsf_init(void)
 		goto init_fail;
 	}
 
+    ret = nf_register_sockopt(&hsf_sockopts);
+    if (ret < 0) {
+        nf_unregister_hooks(filter_ops, hweight32(packet_filter.valid_hooks));
+        kfree(filter_ops);
+        return ret;
+    }
 	printk("HSF FirmWall Init!\n");
 
 	return 0;
