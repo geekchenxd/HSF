@@ -6,9 +6,11 @@
 #include <linux/netfilter_ipv4/ip_tables.h>
 #include <linux/ip.h>
 #include <net/ip.h>
+#include <net/net_namespace.h>
 //#include "hsf_debug.h"
 
 
+#define HSF_OPT_BASE 1020
 #define HSF_TABLE_MAXNAMELEN 32
 #define FILTER_VALID_HOOKS ((1 << NF_INET_LOCAL_IN) | \
 		(1 << NF_INET_FORWARD) | \
@@ -56,9 +58,14 @@ struct hsf_table {
 
 struct hsf_filter_rules {
 	struct list_head list;
-	struct ipt_ip ipinfo;
-	unsigned int verdict;
+	struct hsf_entry *e;
 };
+
+struct hsf_replace *
+hsf_replace_alloc(struct hsf_table *table)
+{
+	return NULL;
+}
 
 struct nf_hook_ops *
 hsf_hook_ops_alloc(struct hsf_table *table, nf_hookfn *fn)
@@ -101,7 +108,7 @@ ip_packet_match(const struct iphdr *ip,
 	if (NF_INVF(ipinfo, IPT_INV_SRCIP,
 				(ip->saddr & ipinfo->smsk.s_addr) != ipinfo->src.s_addr) ||
 			NF_INVF(ipinfo, IPT_INV_DSTIP,
-				(ip_>daddr & ipinfo->dmsk.s_addr) != ipinfo->dst.s_addr))
+				(ip->daddr & ipinfo->dmsk.s_addr) != ipinfo->dst.s_addr))
 		return false;
 
 	ret = ifname_compare_aligned(indev, ipinfo->iniface, ipinfo->iniface_mask);
@@ -157,14 +164,14 @@ static unsigned int hsf_do_table(void *priv, struct sk_buff *skb,
 
 	list_for_each(pos, hook_head) {
 		rule = list_entry(pos, struct hsf_filter_rules, list);
-		if (!ip_packet_match(ip, indev, outdev, &rule->ipinfo))
+		if (!ip_packet_match(ip, indev, outdev, &rule->e->ipinfo))
 			continue;
 		else
-			return rule->verdict;
+			return rule->e->verdict;
 
 	}
 
-	return NF_ACCEPT;
+	return NF_DROP;
 }
 
 static unsigned int
@@ -180,18 +187,30 @@ hsf_filter_hook(void *priv, struct sk_buff *skb,
 	return hsf_do_table(priv, skb, state);
 }
 
+static int
+do_hsf_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
+{
+	return 0;
+}
+
+static int
+do_hsf_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
+{
+	return 0;
+}
+
 static struct nf_sockopt_ops hsf_sockopts = {
     .pf     = PF_INET,
-    .set_optmin = IPT_BASE_CTL,
-    .set_optmax = IPT_SO_SET_MAX + 1,
+    .set_optmin = HSF_OPT_BASE,
+    .set_optmax = HSF_OPT_BASE + 3,
     .set    = do_hsf_set_ctl,
-    .get_optmin = IPT_BASE_CTL,
-    .get_optmax = IPT_SO_GET_MAX + 1,
+    .get_optmin = HSF_OPT_BASE,
+    .get_optmax = HSF_OPT_BASE + 3,
     .get    = do_hsf_get_ctl,
     .owner  = THIS_MODULE,
 };
 
-int __init hsf_init(void)
+static int __net_init hsf_tables_net_init(struct net *net)
 {
 	int i,ret;
 	struct hsf_table *tb;
@@ -205,32 +224,54 @@ int __init hsf_init(void)
 	if (IS_ERR(filter_ops))
 		return PTR_ERR(filter_ops);
 
-	ret = nf_register_hooks(filter_ops, hweight32(packet_filter.valid_hooks));
+	ret = nf_register_net_hooks(net, filter_ops, hweight32(packet_filter.valid_hooks));
 	if (ret) {
-		//FIRMWALL_DEBUG("Register hook fialed!\n");
-		goto init_fail;
+		printk("HSF register net hooks fialed!\n");
+        kfree(filter_ops);
 	}
 
+	return ret;
+}
+
+static void __net_exit hsf_tables_net_exit(struct net *net)
+{
+	nf_unregister_net_hooks(net, filter_ops, hweight32(packet_filter.valid_hooks));
+	kfree(filter_ops);
+}
+
+static struct pernet_operations hsf_tables_net_ops = {
+	.init = hsf_tables_net_init,
+	.exit = hsf_tables_net_exit,
+};
+
+int __init hsf_init(void)
+{
+	int ret;
+
+	ret = register_pernet_subsys(&hsf_tables_net_ops);
+	if (ret < 0)
+		goto err1;
+
     ret = nf_register_sockopt(&hsf_sockopts);
-    if (ret < 0) {
-        nf_unregister_hooks(filter_ops, hweight32(packet_filter.valid_hooks));
-        kfree(filter_ops);
-        return ret;
-    }
-	printk("HSF FirmWall Init!\n");
+    if (ret < 0) 
+		goto err2;
+
+	printk("HSF Init!\n");
 
 	return 0;
 
-init_fail:
+err2:
+	unregister_pernet_subsys(&hsf_tables_net_ops);
+err1:
 	return ret;
 }
 
 void __exit hsf_exit(void)
 {
-	nf_unregister_hooks(filter_ops, hweight32(packet_filter.valid_hooks));
-	kfree(filter_ops);
+	nf_unregister_sockopt(&hsf_sockopts);
+	unregister_pernet_subsys(&hsf_tables_net_ops);
 
-	printk("HSF FireWall exit!\n");
+	printk("HSF Exit!\n");
 }
 
 module_init(hsf_init);
@@ -240,59 +281,3 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("haiyam320@gmail.com");
 MODULE_DESCRIPTION("Hylian Shield Firewall");
 MODULE_VERSION("0.0.1");
-#if 0
-static unsigned int 
-firewall_local_in(void *priv, struct sk_buff *skb,
-		const struct nf_hook_state *state)
-{
-	struct iphdr *iph = ip_hdr(skb);
-	__be32 saddr = ntohl(iph->saddr);
-	__be32 daddr = ntohl(iph->daddr);
-	__be16 sport = 0, dport = 0;
-	int port_check = 1;
-	struct tcphdr *tcph = NULL;
-	struct udphdr *udph = NULL;
-	struct firewall_rules *r;
-
-	switch (r->default_rules) {
-	case RULES_ALL:
-		return NF_ACCEPT;
-	case RULES_NULL:
-		goto nf_drop;
-	default:
-		break;
-	}
-
-	if (r->ip_in_rules == RULES_NULL ||
-			r->port_in_rules == RULES_NULL)
-		goto nf_drop;
-
-	if (r->ip_in_rules != RULES_ALL)
-		if (ip_filter(&r->ip_in_head, saddr))
-			goto nf_drop;
-
-	if (iph->protocol == IPPROTO_TCP) {
-		tcph = tcp_hdr(skb);
-		sport = tcph->source;
-		dport = tcph->dest;
-	} else if (iph->protocol == IPPROTO_UDP) {
-		udph = udp_hdr(skb);
-		sport = udph->source;
-		dport = udph->dest;
-	} else {
-		port_check = 0;
-	}
-
-	if (!port_check)
-		return ACCEPT;
-
-	if (r->.port_in_rules != RULES_ALL)
-		if (port_filter(&r->.port_in_head, dport))
-			goto nf_drop;
-
-	return NF_ACCEPT;
-
-nf_drop:
-	return NF_DROP;
-}
-#endif
