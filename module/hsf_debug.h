@@ -1,12 +1,12 @@
 #ifndef _FIRMWALL_DEBUG_H__
 #define _FIRMWALL_DEBUG_H__
 
-#define FIRMWALL_DEBUG 1
+#define FIREWALL_DEBUG_OPT 1
 
-#if FIRMWALL_DEBUG
-#define FIRMWALL_DEBUG printk
+#if FIREWALL_DEBUG_OPT
+#define FIREWALL_DEBUG printk
 #else
-#define FIRMWALL_DEBUG(fmt, args...)
+#define FIREWALL_DEBUG(fmt, args...)
 #endif
 
 #endif
