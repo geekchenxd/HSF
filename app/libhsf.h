@@ -1,3 +1,6 @@
+#ifndef __LIB_HSF_H__
+#define __LIB_HSF_H__
+
 #include <stdint.h>
 #include <net/if.h>
 #include "list.h"
@@ -110,8 +113,14 @@ struct hsf_filter_rules {
 	struct hsf_entry *e;
 };
 
+struct sock_ops {
+    int socket;
+}
+
 struct hsf {
 	struct hsf_table *tb;
 	struct sock_ops *sk;
 };
 
+
+#endif

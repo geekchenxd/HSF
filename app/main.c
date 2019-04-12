@@ -4,7 +4,7 @@
 #include <sys/types.h>
 #include <netinet/ip.h>
 #include <netinet/in.h>
-#include "hsf.h"
+#include "libhsf.h"
 
 
 int do_cmd(int argc, char *argv[])
