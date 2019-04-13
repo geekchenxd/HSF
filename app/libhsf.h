@@ -98,8 +98,6 @@ struct hsf_table {
 	/* What hooks you will enter on */
 	unsigned int valid_hooks;
 	
-	/* Set this to THIS_MODULE if you are a module, otherwise NULL */
-	struct module *me;
 	u_int8_t af;	/*address/protocol family */
 	int priority;	/* hook order */
 	void *private;
@@ -115,12 +113,16 @@ struct hsf_filter_rules {
 
 struct sock_ops {
     int socket;
-}
+};
 
 struct hsf {
 	struct hsf_table *tb;
 	struct sock_ops *sk;
 };
 
+struct hsf_pprot {
+	char *name;
+	uint8_t num;
+};
 
 #endif
